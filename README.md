@@ -31,7 +31,7 @@ This work represents a natural extension and refactoring of the direct collocati
 ## Prerequisites & Dependencies
 
 To run this code, you need:
-1. **MATLAB** (latest version recommended).
+1. **MATLAB** (R2021b or later recommended, as the plotting suite uses the `theme` command).
 2. **ICLOCS2 Toolbox** (Imperial College London Optimal Control Software v2). Ensure the `src` and `usr` directories are properly added to your MATLAB path.
 3. **IPOPT** NLP solver (interfaced via MEX files within ICLOCS2).
 4. **ADiGator** (optional, for automatic differentiation and analytical derivative generation).
