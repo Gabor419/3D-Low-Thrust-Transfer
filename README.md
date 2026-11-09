@@ -14,7 +14,7 @@ This work represents a natural extension and refactoring of the direct collocati
 
 - **Direct Collocation Architecture:** Formulates the interplanetary trajectory optimization as a Non-Linear Programming (NLP) problem, solved efficiently via IPOPT.
 - **Free-TOF & Ephemeris Parser:** Automatically parses JPL Horizons vector tables (`.txt`/`.csv`) for Earth and target bodies, evaluating continuous boundary conditions through smooth $C^\infty$ local polynomial approximations (Horner's method).
-- **Singularity-Free Control Formulation:** Employs an inertial spherical frame with steering angles ($\alpha, \beta_{\text{rel}}$) and engine throttling ($\tau$), ensuring a smooth and well-conditioned Hessian matrix for rapid convergence.
+- **Singularity-Free Control Formulation:** Employs an inertial spherical frame with normalized thrust direction components ($\mathbf{u} = [u_x, u_y, u_z]$) and engine throttling ($\tau$), ensuring a smooth and well-conditioned Hessian matrix for rapid convergence.
 - **Homotopy Continuation Method:** Implements a multi-step continuation strategy transitioning from an energy-optimal smooth profile to a fuel-optimal bang-bang-like trajectory.
 - **Rigorous Verification Pipeline:** Includes open-loop verification via MATLAB's `ode45` integrator with strict tolerances ($\leq 10^{-8}$), ensuring precise consistency between the collocation nodes and continuous integration.
 - **Advanced Post-Processing:** Automated extraction of Cartesian costates (Primer Vector theory), switching functions, Hamiltonian evaluation, and 3D heliocentric trajectory visualizations with thrust vectors.
