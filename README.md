@@ -45,7 +45,7 @@ To run this code, you need:
 3. Update the `addpath` lines at the top of `main_mars.m` to point to your local installation of `ICLOCS2`.
 4. Run the main script:
    ```matlab
-   run('main_mars.m');
+   run('main.m');
    ```
 
 ---
