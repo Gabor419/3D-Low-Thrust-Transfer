@@ -41,8 +41,8 @@ To run this code, you need:
 ## Usage
 
 1. Clone or download this repository and open it in MATLAB.
-2. *(Optional)* Replace `ephem_earth.txt` and `ephem_mars.txt` or adjust `tf_epoch`, `arr_window_days`, and `TOF_window_days` in `main_mars.m` to explore different missions or launch windows.
-3. Update the `addpath` lines at the top of `main_mars.m` to point to your local installation of `ICLOCS2`.
+2. *(Optional)* Replace `ephem_earth.txt` and `ephem_mars.txt` or adjust `tf_epoch`, `arr_window_days`, and `TOF_window_days` in `main.m` to explore different missions or launch windows.
+3. Update the `addpath` lines at the top of `main.m` to point to your local installation of `ICLOCS2`.
 4. Run the main script:
    ```matlab
    run('main.m');
