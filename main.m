@@ -3,11 +3,19 @@
 %  AUTHOR  : Gabriele Borghini - November 2026
 %  Based on ICLOCS2 problem template (Copyright (c) 2018 Imperial College London, MIT License)
 % =========================================================================
+%  Copyright (c) 2026 Gabriele Borghini. All Rights Reserved.
+% 
 % COPYRIGHT AND USAGE RIGHTS:
 %  The source code, problem formulation, and custom scripts contained herein 
-%  are the intellectual property of the author. They may not be copied, 
-%  modified, redistributed, or used for commercial purposes without the 
-%  express written consent of the author.
+%  are the intellectual property of the author. Permission is hereby granted,
+%  free of charge, to any person obtaining a copy of this software and 
+%  associated documentation files, to deal in the Software without 
+%  restriction, including without limitation the rights to use, copy, 
+%  modify, merge, publish, distribute and sublicense copies of the Software,
+%  and to permit persons to whom the Software is furnished to do so, subject 
+%  to the following conditions:
+%  The above copyright notice and this permission notice shall be included 
+%  in all copies or substantial portions of the Software.
 %
 % ACADEMIC CONTEXT & THIRD-PARTY TOOLS:
 %  Developed solely for academic research, advanced astrodynamics studies, 
@@ -27,8 +35,8 @@
 %  This code is an extension and adaptation of the direct collocation framework 
 %  originally developed for launcher ascent trajectory optimization (using ICLOCS2 
 %  and IPOPT). The formulation is refactored to solve 3D heliocentric low-thrust 
-%  interplanetary transfers with a prescribed arrival epoch, free departure time 
-%  (free TOF), and Cartesian steering controls [ux, uy, uz, tau]. 
+%  interplanetary transfers with a reference arrival epoch, FREE arrival window,
+%  FREE departure epoch (free TOF), and Cartesian steering controls [ux, uy, uz, tau]. 
 %
 %  The script automatically extracts Earth and target ephemeris data via vector 
 %  tables, evaluates continuous boundary conditions through smooth polynomial 
@@ -74,39 +82,40 @@ Tmax_nd  = (Thrust_km / m0_kg) * (TU^2 / AU); % Initial acceleration in [AU/TU^2
 mdot_nd  = (mdot_kgs / m0_kg) * TU;           % Mass flow rate in [MU/TU]
 m_dry_nd = m_dry_kg / m0_kg;                  % Dimensionless dry mass [-]
 
-%% --- BOUNDARY CONDITIONS EXTRACTION (FIXED ARRIVAL TIME, FREE DEPARTURE) ---
+%% --- BOUNDARY CONDITIONS EXTRACTION (REFERENCE ARRIVAL + ARRIVAL RANGE & FREE DEPARTURE) ---
 file_earth  = 'ephem_earth.txt';        % Your Earth ephemeris file
 file_target = 'ephem_mars.txt';       % Your Target ephemeris file
 
-tf_epoch        = '2030-07-25 00:00:00'; % FIXED Target Arrival Date!
-TOF_guess_days  = 600.0;                 % [days] Initial TOF guess
-TOF_window_days = [500.0, 800.0];        % [days] Window [TOF_min, TOF_max] -> optimizes departure date!
-n_rev           = [];                    % Automatic computation of revolutions
+tf_epoch        = '2030-11-19 00:00:00'; % Reference Target Arrival Date
+arr_window_days = [-60.0, 0.0];         % [days] Arrival window [dtf_min, dtf_max] relative to tf_epoch
+TOF_guess_days  = 800.0;                 % [days] Initial TOF guess
+TOF_window_days = [700.0, 850.0];        % [days] TOF window [TOF_min, TOF_max] -> optimizes departure date too!
+n_rev           = [];                    % Automatic computation of revolutionsephem_info.dep_window_days
 units_flag      = 'km_s';
 
-[x0_guess_nd, xf_nd, tf_bounds_tu, ephem_info] = get_boundary_conditions( ...
-    file_earth, file_target, tf_epoch, TOF_guess_days, TOF_window_days, n_rev, units_flag);
+[x0_guess_nd, xf_guess_nd, tf_bounds_tu, dtf_bounds_tu, ephem_info] = get_boundary_conditions( ...
+    file_earth, file_target, tf_epoch, arr_window_days, TOF_guess_days, TOF_window_days, n_rev, units_flag);
 
-rf = xf_nd(1);  thetaf = xf_nd(2);  phif = xf_nd(3);  vf = xf_nd(4);
-
-fprintf('Departure Guess (TOF %.0f d) -> r0 = %.4f AU, lon0 = %.2f deg, lat0 = %.2f deg (TOF Window: [%.0f, %.0f] d)\n', ...
-        TOF_guess_days, x0_guess_nd(1), rad2deg(x0_guess_nd(2)), rad2deg(x0_guess_nd(3)), TOF_window_days(1), TOF_window_days(2));
-fprintf('Fixed Arrival (JD %.2f)   -> rf = %.4f AU, lonf = %.2f deg, latf = %.2f deg\n', ...
-        ephem_info.JD_tf, rf, rad2deg(thetaf), rad2deg(phif));
+fprintf('Departure Guess (JD %.2f) -> r0 = %.4f AU, lon0 = %.2f deg, lat0 = %.2f deg (Dep Window: [%+.0f, %+.0f] d)\n', ...
+        ephem_info.JD_t0_guess, x0_guess_nd(1), rad2deg(x0_guess_nd(2)), rad2deg(x0_guess_nd(3)), ...
+        ephem_info.dep_window_days(1), ephem_info.dep_window_days(2));
+fprintf('Arrival Guess   (JD %.2f) -> rf = %.4f AU, lonf = %.2f deg, latf = %.2f deg (Arr Window: [%+.0f, %+.0f] d | TOF Window: [%.0f, %.0f] d)\n', ...
+        ephem_info.JD_tf_guess, xf_guess_nd(1), rad2deg(xf_guess_nd(2)), rad2deg(xf_guess_nd(3)), ...
+        arr_window_days(1), arr_window_days(2), TOF_window_days(1), TOF_window_days(2));
 
 %% --- PROBLEM (STEP 1: ENERGY-OPTIMAL -> STEP 2: FUEL-OPTIMAL) ---
-N_nodes_step1 = 150;  % Grid for Step 1 (energy)
-N_nodes_hom   = 300;  % Dense grid for energy -> fuel homotopy (exact match with ode45)
+N_nodes_step1 = 150;  % Fast 150-node grid for Step 1 (avoids MUMPS memory fill-in)
+N_nodes_hom   = 300;  % Dense 300-node grid for energy -> fuel homotopy
 
-% Residual checks both Earth departure matching at t=0 and Target arrival matching at t=tf
-res_fun = @(sol) max([max(abs(sol.X(1,1:6).'   - ppval(ephem_info.pp_earth, sol.tf))); ...
-                      max(abs(sol.X(end,1:6).' - xf_nd(1:6).'))]);
+% Residual checks both Earth departure matching at dt0 = p(1) - (tf - tf_guess) and Target arrival matching at dtf = p(1)
+res_fun = @(sol) max([max(abs(sol.X(1,1:6).'   - ppval(ephem_info.pp_earth,  sol.p(1) - (sol.tf - tf_bounds_tu.guess)))); ...
+                      max(abs(sol.X(end,1:6).' - ppval(ephem_info.pp_target, sol.p(1))))]);
 res_tol = 5e-3;
 
 fprintf('n_rev = %d (estimate %d), margin = %.2f\n', ephem_info.n_rev, ephem_info.n_rev_est, ephem_info.dtheta_margin);
 
-fprintf('\n=== STEP 1: Energy-Optimal Resolution with free departure (free TOF) ===\n');
-[problem_e, guess_e] = low_thrust(x0_guess_nd, xf_nd, tf_bounds_tu, ephem_info.pp_earth, Tmax_nd, mdot_nd, m_dry_nd, 'energy');
+fprintf('\n=== STEP 1: Energy-Optimal Resolution with free arrival & free departure ===\n');
+[problem_e, guess_e] = low_thrust(x0_guess_nd, xf_guess_nd, tf_bounds_tu, dtf_bounds_tu, ephem_info, Tmax_nd, mdot_nd, m_dry_nd, 'energy');
 options_e = problem_e.settings(N_nodes_step1);
 options_e.meshstrategy = 'fixed';
 [sol_e, ~] = solveMyProblem(problem_e, guess_e, options_e);
@@ -114,11 +123,11 @@ options_e.meshstrategy = 'fixed';
 r1 = res_fun(sol_e);
 fprintf('Step 1: boundary residual = %.2e (tol %.0e)\n', r1, res_tol);
 if r1 > res_tol
-    error(['Step 1 infeasible (residual %.2e). Cannot proceed: widen TOF_window_days, ' ...
+    error(['Step 1 infeasible (residual %.2e). Cannot proceed: widen arr_window_days / TOF_window_days, ' ...
            'check n_rev and maximum thrust.'], r1);
 end
 
-fprintf('\n=== STEP 2: Homotopy energy -> fuel, free departure (free TOF) ===\n');
+fprintf('\n=== STEP 2: Homotopy energy -> fuel, free arrival & free departure ===\n');
 eps_list = [1e-2, 5e-4, 2e-5];
 sol_prev = sol_e;
 solution = sol_e;
@@ -126,8 +135,9 @@ problem  = problem_e;
 
 for k = 1:numel(eps_list)
     fprintf('\n--- Homotopy: eps = %.1e ---\n', eps_list(k));
-    [problem_k, guess_k] = low_thrust(x0_guess_nd, xf_nd, tf_bounds_tu, ephem_info.pp_earth, Tmax_nd, mdot_nd, m_dry_nd, eps_list(k));
+    [problem_k, guess_k] = low_thrust(x0_guess_nd, xf_guess_nd, tf_bounds_tu, dtf_bounds_tu, ephem_info, Tmax_nd, mdot_nd, m_dry_nd, eps_list(k));
     guess_k.tf          = sol_prev.tf;
+    guess_k.parameters  = sol_prev.p;
     guess_k.time        = sol_prev.T;
     guess_k.states      = sol_prev.X;
     guess_k.inputs      = sol_prev.U;
@@ -136,9 +146,18 @@ for k = 1:numel(eps_list)
     end
     options_k = problem_k.settings(N_nodes_hom);
     options_k.meshstrategy = 'fixed';
-    if k > 1
+    if k == 1
+        % Low initial barrier parameter prevents Cold-start from perturbing the Step 1 trajectory
+        options_k.ipopt.mu_init = 1e-3;
+    else
         options_k.start = 'Warm';
         options_k.ipopt.mu_init = 1e-4;
+        options_k.ipopt.warm_start_init_point       = 'yes';
+        options_k.ipopt.warm_start_bound_push       = 1e-6;
+        options_k.ipopt.warm_start_bound_frac       = 1e-6;
+        options_k.ipopt.warm_start_slack_bound_frac = 1e-6;
+        options_k.ipopt.warm_start_slack_bound_push = 1e-6;
+        options_k.ipopt.warm_start_mult_bound_push  = 1e-6;
     end
     [sol_k, ~] = solveMyProblem(problem_k, guess_k, options_k);
 
@@ -158,7 +177,7 @@ Un   = solution.U;
 uRaw = @(t) interp1(Tn, Un, t, 'linear', 'extrap');
 uFun = @(t) [uRaw(t)*[eye(3); zeros(1,3)] ./ max(sqrt(sum((uRaw(t)*[eye(3); zeros(1,3)]).^2, 2)), 1e-12), ...
              max(0, min(1, uRaw(t)*[0;0;0;1]))];
-rhs  = @(t,x) low_thrust_dynamics(x.', uFun(t), [], t, vd).';
+rhs  = @(t,x) low_thrust_dynamics(x.', uFun(t), solution.p, t, vd).';
 
 odeopt = odeset('RelTol', 1e-10, 'AbsTol', 1e-10*ones(1,7));
 [tv, xv] = ode45(rhs, [Tn(1) Tn(end)], solution.X(1,:).', odeopt);
@@ -167,15 +186,29 @@ uv = uFun(tv);
 %% --- DATA REFINEMENT ---
 t_days_opt   = solution.T * TU / 86400;
 t_days_sim   = tv * TU / 86400;
-TOF_opt_days = solution.tf * TU / 86400;
-JD_dep_opt   = ephem_info.JD_tf - TOF_opt_days;
+dtf_opt_tu   = solution.p(1);
+dt0_opt_tu   = dtf_opt_tu - (solution.tf - tf_bounds_tu.guess);
 
-% Evaluate exact Earth state at the optimal departure epoch found by IPOPT
-x0_earth_opt = ppval(ephem_info.pp_earth, solution.tf);
+dtf_opt_days = dtf_opt_tu * TU / 86400;
+dt0_opt_days = dt0_opt_tu * TU / 86400;
+TOF_opt_days = solution.tf * TU / 86400;
+
+JD_arr_opt   = ephem_info.JD_tf_guess + dtf_opt_days;
+JD_dep_opt   = JD_arr_opt - TOF_opt_days;
+
+% Evaluate exact Earth and Target states at the optimal epochs found by IPOPT
+x0_earth_opt  = ppval(ephem_info.pp_earth,  dt0_opt_tu);
+xf_target_opt = ppval(ephem_info.pp_target, dtf_opt_tu);
+
 r0     = x0_earth_opt(1);
 theta0 = x0_earth_opt(2);
 phi0   = x0_earth_opt(3);
 v0     = x0_earth_opt(4);
+
+rf     = xf_target_opt(1);
+thetaf = xf_target_opt(2);
+phif   = xf_target_opt(3);
+vf     = xf_target_opt(4);
 
 mf_opt_kg  = solution.X(end,7) * m0_kg;
 mf_sim_kg  = xv(end,7) * m0_kg;
@@ -183,13 +216,15 @@ mp_used_kg = m0_kg - mf_opt_kg;
 dV_tot_kms = Isp_s * g0 * log(m0_kg / mf_opt_kg);
 
 %% --- FINAL REPORT ---
-fprintf('\n=== LOW-THRUST TRANSFER RESULTS (FIXED ARRIVAL, FREE DEPARTURE) ===\n\n');
+fprintf('\n=== LOW-THRUST TRANSFER RESULTS (FREE ARRIVAL & FREE DEPARTURE) ===\n\n');
 fprintf('OPTIMAL time of flight (TOF): %.2f days (Guess: %.1f d | Window: [%.0f, %.0f] d)\n', ...
         TOF_opt_days, TOF_guess_days, TOF_window_days(1), TOF_window_days(2));
-fprintf('OPTIMAL departure date      : %s (JD %.2f)\n', ...
-        datestr(datetime(JD_dep_opt, 'ConvertFrom', 'juliandate')), JD_dep_opt);
-fprintf('FIXED arrival date          : %s (JD %.2f)\n', ...
-        datestr(datetime(ephem_info.JD_tf, 'ConvertFrom', 'juliandate')), ephem_info.JD_tf);
+fprintf('OPTIMAL departure date      : %s (JD %.2f | Shift: %+.2f d, Window: [%+.0f, %+.0f] d)\n', ...
+        datestr(datetime(JD_dep_opt, 'ConvertFrom', 'juliandate')), JD_dep_opt, dt0_opt_days, ...
+        ephem_info.dep_window_days(1), ephem_info.dep_window_days(2));
+fprintf('OPTIMAL arrival date        : %s (JD %.2f | Shift: %+.2f d, Window: [%+.0f, %+.0f] d)\n', ...
+        datestr(datetime(JD_arr_opt, 'ConvertFrom', 'juliandate')), JD_arr_opt, dtf_opt_days, ...
+        arr_window_days(1), arr_window_days(2));
 fprintf('Initial radius (opt/Earth)  : %.4f AU / %.4f AU\n', solution.X(1,1), r0);
 fprintf('Final radius (opt / targ)   : %.4f AU / %.4f AU (ode45: %.4f AU)\n', solution.X(end,1), rf, xv(end,1));
 fprintf('Final longitude             : %.2f deg (target: %.2f deg | ode45: %.2f deg)\n', rad2deg(solution.X(end,2)), rad2deg(thetaf), rad2deg(xv(end,2)));
@@ -332,7 +367,7 @@ if isfield(solution, 'multipliers') && isfield(solution.multipliers, 'lambda_1to
         SF(k)  = (p_norm * Tmax_nd / mk) - abs(lm) * mdot_nd;
         
         % --- D) Complete Hamiltonian (H = L + lambda^T * f) ---
-        dx_k  = low_thrust_dynamics(solution.X(k,:), solution.U(k,:), [], solution.T(k), problem.data);
+        dx_k  = low_thrust_dynamics(solution.X(k,:), solution.U(k,:), solution.p, solution.T(k), problem.data);
         eps_f = problem.data.mode_opt;
         if ischar(eps_f), eps_f = 0; end
         L_k   = 10.0 * eps_f * (solution.U(k,4)^2) + 1e-7 * sum(solution.U(k,1:3).^2);
@@ -409,6 +444,6 @@ grid on; axis equal;
 xlabel('X_{HECI} [AU]'); ylabel('Y_{HECI} [AU]'); zlabel('Z_{HECI} [AU]');
 title('3D Heliocentric Low-Thrust Transfer & Thrust Vectors');
 legend('Earth Orbit (1 AU)', 'Target Orbit', 'Sun', 'Transfer Trajectory', ...
-       'Optimal Earth Departure (t_0)', 'Fixed Target Arrival (t_f)', 'Thrust Vectors', 'Location', 'best');
+       'Optimal Earth Departure (t_0)', 'Optimal Target Arrival (t_f)', 'Thrust Vectors', 'Location', 'best');
 view(35, 25); theme('light');
 drawnow;

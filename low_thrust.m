@@ -1,14 +1,22 @@
-function [problem, guess] = low_thrust(x0_guess_nd, xf_nd, tf_bounds_tu, pp_earth, Tmax_nd, mdot_nd, m_dry_nd, mode_opt)
+function [problem, guess] = low_thrust(x0_guess_nd, xf_guess_nd, tf_bounds_tu, dtf_bounds_tu, ephem_info, Tmax_nd, mdot_nd, m_dry_nd, mode_opt)
 %% ========================================================================
 %% PROJECT : Interplanetary 3D Low-Thrust Transfer Optimization (ICLOCS2 + IPOPT)
 %  AUTHOR  : Gabriele Borghini - November 2026
 %  Based on ICLOCS2 problem template (Copyright (c) 2018 Imperial College London, MIT License)
 % =========================================================================
+%  Copyright (c) 2026 Gabriele Borghini. All Rights Reserved.
+% 
 % COPYRIGHT AND USAGE RIGHTS:
 %  The source code, problem formulation, and custom scripts contained herein 
-%  are the intellectual property of the author. They may not be copied, 
-%  modified, redistributed, or used for commercial purposes without the 
-%  express written consent of the author.
+%  are the intellectual property of the author. Permission is hereby granted,
+%  free of charge, to any person obtaining a copy of this software and 
+%  associated documentation files, to deal in the Software without 
+%  restriction, including without limitation the rights to use, copy, 
+%  modify, merge, publish, distribute and sublicense copies of the Software,
+%  and to permit persons to whom the Software is furnished to do so, subject 
+%  to the following conditions:
+%  The above copyright notice and this permission notice shall be included 
+%  in all copies or substantial portions of the Software.
 %
 % ACADEMIC CONTEXT & THIRD-PARTY TOOLS:
 %  Developed solely for academic research, advanced astrodynamics studies, 
@@ -25,8 +33,8 @@ function [problem, guess] = low_thrust(x0_guess_nd, xf_nd, tf_bounds_tu, pp_eart
 %  of this software.
 % -------------------------------------------------------------------------
 % DESCRIPTION:
-%  3D heliocentric low-thrust interplanetary transfer (Fixed Arrival, Free Departure).
-%   - fixed arrival epoch at target body; free TOF (free departure epoch)
+%  3D heliocentric low-thrust interplanetary transfer (Fixed range Arrival, Free Departure).
+%   - fixed arrival range at target body; free TOF (free departure epoch)
 %   - continuous departure matching via C^inf smooth Earth ephemeris polynomials
 %   - Cartesian unit vector steering controls [ux, uy, uz] and throttling tau in [0,1]
 %   - cost function: fuel-optimal maximization of final mass (-m_f) via homotopy
@@ -34,8 +42,6 @@ function [problem, guess] = low_thrust(x0_guess_nd, xf_nd, tf_bounds_tu, pp_eart
 %  State:   x = [r, theta, phi, v, gamma, chi, m]
 %  Control: u = [ux, uy, uz, tau]   (Up, North, East, Throttle)
 %  Normalization Units: Canonical heliocentric units (AU, TU, VU, MU)
-% =========================================================================
-%  Copyright (c) 2026 Gabriele Borghini. All Rights Reserved.
 % =========================================================================
 
 %% --- CONSTANTS ---
@@ -50,16 +56,18 @@ problem.analyticDeriv.hessianLagrangian = [];
 problem.analyticDeriv.jacConst          = [];
 problem.settings = @settings_low_thrust;
 
-%% --- TIME (Internal clock [0, tf] where tf = TOF is FREE) ---
+%% --- TIME & PARAMETERS (Clock [0, tf] where tf = TOF is FREE, p(1) = dtf is FREE) ---
 problem.time.t0_min = 0;                  problem.time.t0_max = 0;                  guess.t0 = 0;
 problem.time.tf_min = tf_bounds_tu.min;   problem.time.tf_max = tf_bounds_tu.max;   guess.tf = tf_bounds_tu.guess;
 
-problem.parameters.pl = [];  problem.parameters.pu = [];  guess.parameters = [];
+problem.parameters.pl = dtf_bounds_tu.min;
+problem.parameters.pu = dtf_bounds_tu.max;
+guess.parameters      = dtf_bounds_tu.guess;
 
 %% --- STATES ---
-theta_min = min(x0_guess_nd(2), xf_nd(2)) - 2*pi;
-theta_max = max(x0_guess_nd(2), xf_nd(2)) + 2*pi;
-ang_lim   = 1.2; % ~68 deg (far from pi/2 singularity without over-constraining the optimizer)
+theta_min = min(x0_guess_nd(2), xf_guess_nd(2)) - 2*pi;
+theta_max = max(x0_guess_nd(2), xf_guess_nd(2)) + 2*pi;
+ang_lim   = 1.2;
 
 % Path bounds
 problem.states.xl = [0.3,  theta_min, -ang_lim,  0.2,  -ang_lim,  -pi,   m_dry_nd];
@@ -70,9 +78,9 @@ problem.states.x0  = [];
 problem.states.x0l = [problem.states.xl(1:6), 1.0];
 problem.states.x0u = [problem.states.xu(1:6), 1.0];
 
-% Final state: xf(1:6) is FIXED to Target state at arrival epoch, m(tf) is FREE in [m_dry_nd, 1.0]
-problem.states.xfl = [xf_nd(1:6), m_dry_nd];
-problem.states.xfu = [xf_nd(1:6), 1.0];
+% Final state: xf(1:6) is FREE within bounds (matched to Target via b_unscaled), m(tf) is FREE in [m_dry_nd, 1.0]
+problem.states.xfl = [problem.states.xl(1:6), m_dry_nd];
+problem.states.xfu = [problem.states.xu(1:6), 1.0];
 
 problem.states.xErrorTol_local    = [1e-6 1e-6 1e-6 1e-6 1e-6 1e-6 1e-6];
 problem.states.xErrorTol_integral = [1e-6 1e-6 1e-6 1e-6 1e-6 1e-6 1e-6];
@@ -82,7 +90,6 @@ problem.states.xConstraintTol     = [1e-5 1e-5 1e-5 1e-5 1e-5 1e-5 1e-5];
 problem.inputs.N   = 0;
 problem.inputs.ul  = [-1.1, -1.1, -1.1, 0.0];
 problem.inputs.uu  = [ 1.1,  1.1,  1.1, 1.0];
-% The limit on the time derivative of [ux, uy, uz] stabilizes the Hessian during coasting arcs (tau = 0)
 problem.inputs.rl  = [-2.0, -2.0, -2.0, -inf];
 problem.inputs.ru  = [ 2.0,  2.0,  2.0,  inf];
 problem.inputs.u0l = [-1.1, -1.1, -1.1, 0.0];
@@ -100,27 +107,26 @@ problem.constraints.gl       = [];
 problem.constraints.gu       = [];
 problem.constraints.gTol_neq = [];
 
-% Boundary constraint b_unscaled (6 equations): x0(1:6) - x_Earth(tf) = 0
-problem.constraints.bl   = zeros(6, 1);
-problem.constraints.bu   = zeros(6, 1);
-problem.constraints.bTol = 1e-5 * ones(6, 1);
+% Boundary constraint b_unscaled (12 equations):
+%  1..6:  x0(1:6) - x_Earth(dt0)  = 0,  with dt0 = p(1) - (tf - tf_guess)
+%  7..12: xf(1:6) - x_Target(dtf) = 0,  with dtf = p(1)
+problem.constraints.bl   = zeros(12, 1);
+problem.constraints.bu   = zeros(12, 1);
+problem.constraints.bTol = 1e-5 * ones(12, 1);
 
 %% --- DATA ---
-problem.data.mu       = mu;
-problem.data.Tmax     = Tmax_nd;
-problem.data.mdot_max = mdot_nd;
-problem.data.mode_opt = mode_opt;
-problem.data.pp_earth = pp_earth;
-
-% Smooth polynomial coefficients for Earth state as a function of TOF (tf)
-t_samp  = linspace(tf_bounds_tu.min, tf_bounds_tu.max, 100).';
-dt_samp = t_samp - tf_bounds_tu.guess;
-y_samp  = ppval(pp_earth, t_samp).';
-P_earth = zeros(5, 6);
-for k = 1:6
-    P_earth(:,k) = polyfit(dt_samp, y_samp(:,k), 4).';
-end
-problem.data.P_earth     = P_earth;
+problem.data.mu          = mu;
+problem.data.Tmax        = Tmax_nd;
+problem.data.mdot_max    = mdot_nd;
+problem.data.mode_opt    = mode_opt;
+problem.data.pp_earth    = ephem_info.pp_earth;
+problem.data.pp_target   = ephem_info.pp_target;
+problem.data.P_earth     = ephem_info.poly_earth;
+problem.data.P_target    = ephem_info.poly_target;
+problem.data.dt0_mid     = ephem_info.dt0_mid;
+problem.data.dt0_half    = ephem_info.dt0_half;
+problem.data.dtf_mid     = ephem_info.dtf_mid;
+problem.data.dtf_half    = ephem_info.dtf_half;
 problem.data.tf_guess_tu = tf_bounds_tu.guess;
 
 %% --- SMOOTH INITIAL GUESS (4 Controls: ux, uy, uz, throttle) ---
@@ -129,18 +135,17 @@ t_vec   = linspace(0, tf_bounds_tu.guess, N_guess).';
 s       = linspace(0, 1, N_guess).';
 guess.time = t_vec;
 
-r_g     = (1 - s)*x0_guess_nd(1) + s*xf_nd(1);
-theta_g = (1 - s)*x0_guess_nd(2) + s*xf_nd(2);
-phi_g   = (1 - s)*x0_guess_nd(3) + s*xf_nd(3);
-v_g     = (1 - s)*x0_guess_nd(4) + s*xf_nd(4);
-gam_g   = (1 - s)*x0_guess_nd(5) + s*xf_nd(5);
-chi_g   = (1 - s)*x0_guess_nd(6) + s*xf_nd(6);
+r_g     = (1 - s)*x0_guess_nd(1) + s*xf_guess_nd(1);
+theta_g = (1 - s)*x0_guess_nd(2) + s*xf_guess_nd(2);
+phi_g   = (1 - s)*x0_guess_nd(3) + s*xf_guess_nd(3);
+v_g     = (1 - s)*x0_guess_nd(4) + s*xf_guess_nd(4);
+gam_g   = (1 - s)*x0_guess_nd(5) + s*xf_guess_nd(5);
+chi_g   = (1 - s)*x0_guess_nd(6) + s*xf_guess_nd(6);
 m_tf_g  = max(m_dry_nd + 0.1, 1.0 - 0.3 * mdot_nd * tf_bounds_tu.guess);
 m_g     = (1 - s)*1.0 + s*m_tf_g;
 
 guess.states = [r_g, theta_g, phi_g, v_g, gam_g, chi_g, m_g];
 
-% Initial guess: thrust aligned in-plane with local heading chi_g (alpha = 0, beta = chi_g)
 ux_g  = zeros(N_guess, 1);
 uy_g  = cos(chi_g);
 uz_g  = sin(chi_g);
@@ -168,11 +173,13 @@ problem.constraintErrorTol      = [problem.constraints.gTol_eq, problem.constrai
 %% ================= UNSCALED COSTS / CONSTRAINTS =================
 function stageCost = L_unscaled(~, ~, u, ~, ~, t, vdat)
     thr = u(:,4);
+    % Isotropic 1e-6 * ||u_dir||^2 makes all 3 directional eigenvalues strictly positive during coasting
+    u_reg = 1e-6 * (u(:,1).^2 + u(:,2).^2 + u(:,3).^2);
     if ischar(vdat.mode_opt) && strcmp(vdat.mode_opt, 'energy')
-        stageCost = 0.5 * (thr.^2) + 0*t;
+        stageCost = 0.5 * (thr.^2) + u_reg + 0*t;
     else
         if ischar(vdat.mode_opt), eps_h = 1e-4; else, eps_h = vdat.mode_opt; end
-        stageCost = 10.0 * eps_h * (thr.^2) + 0*t;
+        stageCost = 10.0 * eps_h * (thr.^2) + u_reg + 0*t;
     end
 end
 
@@ -185,12 +192,25 @@ function boundaryCost = E_unscaled(~, xf, ~, ~, ~, ~, tf, vdat)
     end
 end
 
-function bc = b_unscaled(x0, ~, ~, ~, ~, ~, tf, vdat, varargin)
-    % Horner polynomial evaluation of Earth departure state at JD_dep = JD_arr - tf
-    dt = tf - vdat.tf_guess_tu;
-    P  = vdat.P_earth;
-    x_earth_t0 = (((P(1,:)*dt + P(2,:))*dt + P(3,:))*dt + P(4,:))*dt + P(5,:);
-    bc = x0(1:6) - x_earth_t0(:);
+function bc = b_unscaled(x0, xf, ~, ~, p, ~, tf, vdat, varargin)
+    % Arrival epoch shift dtf = p(1) and Departure epoch shift dt0 = p(1) - (tf - tf_guess)
+    dtf  = p(1);
+    dt0  = dtf - (tf - vdat.tf_guess_tu);
+
+    % Normalized polynomial arguments strictly centered in [-1, 1]
+    tau0 = (dt0 - vdat.dt0_mid) / vdat.dt0_half;
+    tauf = (dtf - vdat.dtf_mid) / vdat.dtf_half;
+
+    % 4th-degree Horner polynomial evaluation of Earth departure state at tau0
+    PE = vdat.P_earth;
+    x_earth_t0 = (((PE(1,:)*tau0 + PE(2,:))*tau0 + PE(3,:))*tau0 + PE(4,:))*tau0 + PE(5,:);
+
+    % 4th-degree Horner polynomial evaluation of Target arrival state at tauf
+    PT = vdat.P_target;
+    x_target_tf = (((PT(1,:)*tauf + PT(2,:))*tauf + PT(3,:))*tauf + PT(4,:))*tauf + PT(5,:);
+
+    bc = [x0(1:6) - x_earth_t0(:); ...
+          xf(1:6) - x_target_tf(:)];
 
     if ~isempty(varargin) && ~isempty(varargin{1})
         vi = varargin{1};
@@ -215,6 +235,7 @@ function stageCost = L(x, xr, u, ur, p, t, vdat)
         u = scale_variables_back(u, vdat.Uscale, vdat.Ushift);
         if ~isempty(xr); xr = scale_variables_back(xr, vdat.Xscale, vdat.Xshift); end
         if ~isempty(ur); ur = scale_variables_back(ur, vdat.Uscale, vdat.Ushift); end
+        if isfield(vdat,'Pscale') && ~isempty(p); p = scale_variables_back(p, vdat.Pscale, vdat.Pshift); end
     end
     if strcmp(vdat.mode.currentMode,'Feasibility')
         stageCost = 0*t;
@@ -229,6 +250,7 @@ function boundaryCost = E(x0, xf, u0, uf, p, t0, tf, vdat)
         xf = scale_variables_back(xf', vdat.Xscale, vdat.Xshift);
         u0 = scale_variables_back(u0', vdat.Uscale, vdat.Ushift);
         uf = scale_variables_back(uf', vdat.Uscale, vdat.Ushift);
+        if isfield(vdat,'Pscale') && ~isempty(p); p = scale_variables_back(p', vdat.Pscale, vdat.Pshift)'; end
     end
     if strcmp(vdat.mode.currentMode,'Feasibility')
         boundaryCost = sum(sum(p(:,end-vdat.mode.np*2+1:end)));
@@ -242,6 +264,7 @@ function dx = f(x, u, p, t, vdat)
     if isfield(vdat,'Xscale')
         x = scale_variables_back(x, vdat.Xscale, vdat.Xshift);
         u = scale_variables_back(u, vdat.Uscale, vdat.Ushift);
+        if isfield(vdat,'Pscale') && ~isempty(p); p = scale_variables_back(p, vdat.Pscale, vdat.Pshift); end
     end
     dx = f_fn(x, u, p, t, vdat);
     if isfield(vdat,'Xscale')
@@ -255,6 +278,7 @@ function c = g(x, u, p, t, vdat)
     if isfield(vdat,'Xscale')
         x = scale_variables_back(x, vdat.Xscale, vdat.Xshift);
         u = scale_variables_back(u, vdat.Uscale, vdat.Ushift);
+        if isfield(vdat,'Pscale') && ~isempty(p); p = scale_variables_back(p, vdat.Pscale, vdat.Pshift); end
     end
     if ng == 1
         c = [];
@@ -276,6 +300,7 @@ function [dx, c] = fg(x, u, p, t, vdat)
     if isfield(vdat,'Xscale')
         x = scale_variables_back(x, vdat.Xscale, vdat.Xshift);
         u = scale_variables_back(u, vdat.Uscale, vdat.Ushift);
+        if isfield(vdat,'Pscale') && ~isempty(p); p = scale_variables_back(p, vdat.Pscale, vdat.Pshift); end
     end
     if ng == 1
         c = []; dx = fg_fn(x, u, p, t, vdat);
@@ -305,6 +330,7 @@ function bc = b(x0, xf, u0, uf, p, t0, tf, vdat, varargin)
         xf = scale_variables_back(xf', vdat.Xscale, vdat.Xshift);
         u0 = scale_variables_back(u0', vdat.Uscale, vdat.Ushift);
         uf = scale_variables_back(uf', vdat.Uscale, vdat.Ushift);
+        if isfield(vdat,'Pscale') && ~isempty(p); p = scale_variables_back(p', vdat.Pscale, vdat.Pshift)'; end
         bc = b_unscaled(x0, xf, u0, uf, p, t0, tf, vdat, varargin);
     end
 end

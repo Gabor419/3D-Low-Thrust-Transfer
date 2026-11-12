@@ -2,13 +2,21 @@ function options = settings_low_thrust(varargin)
 %% ========================================================================
 %% PROJECT : Interplanetary 3D Low-Thrust Transfer Optimization (ICLOCS2 + IPOPT)
 %  AUTHOR  : Gabriele Borghini - November 2026
-%  Based on ICLOCS2 settings template (Copyright (c) 2018 Imperial College London, MIT License)
+%  Based on ICLOCS2 problem template (Copyright (c) 2018 Imperial College London, MIT License)
 % =========================================================================
+%  Copyright (c) 2026 Gabriele Borghini. All Rights Reserved.
+% 
 % COPYRIGHT AND USAGE RIGHTS:
 %  The source code, problem formulation, and custom scripts contained herein 
-%  are the intellectual property of the author. They may not be copied, 
-%  modified, redistributed, or used for commercial purposes without the 
-%  express written consent of the author.
+%  are the intellectual property of the author. Permission is hereby granted,
+%  free of charge, to any person obtaining a copy of this software and 
+%  associated documentation files, to deal in the Software without 
+%  restriction, including without limitation the rights to use, copy, 
+%  modify, merge, publish, distribute and sublicense copies of the Software,
+%  and to permit persons to whom the Software is furnished to do so, subject 
+%  to the following conditions:
+%  The above copyright notice and this permission notice shall be included 
+%  in all copies or substantial portions of the Software.
 %
 % ACADEMIC CONTEXT & THIRD-PARTY TOOLS:
 %  Developed solely for academic research, advanced astrodynamics studies, 
@@ -57,12 +65,14 @@ options.perturbation.J   = [];
 %% NLP Solver
 options.NLPsolver = 'ipopt';
 
-% IPOPT settings
-options.ipopt.tol                         = 1e-7;
-options.ipopt.constr_viol_tol             = 1e-7;
-options.ipopt.acceptable_tol              = 1e-6;
-options.ipopt.acceptable_constr_viol_tol  = 1e-6;
-options.ipopt.acceptable_iter             = 15;
+% IPOPT settings (calibrated for numeric finite-difference derivatives)
+options.ipopt.tol                         = 1e-6;
+options.ipopt.constr_viol_tol             = 1e-6;
+options.ipopt.acceptable_tol              = 5e-6;
+options.ipopt.acceptable_constr_viol_tol  = 5e-6;
+options.ipopt.acceptable_compl_inf_tol    = 1e-4;
+options.ipopt.acceptable_dual_inf_tol     = 1e-4;
+options.ipopt.acceptable_iter             = 5;
 options.ipopt.max_iter                    = 1000;
 options.ipopt.print_level                 = 5;
 options.ipopt.mu_strategy                 = 'adaptive';
